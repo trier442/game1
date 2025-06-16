@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>일야구도하기 퀴즈 드라이빙 게임</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Jua&display=swap" rel="stylesheet">
+    <script>
+        // 모바일 화면 높이 문제 해결을 위한 스크립트
+        function setScreenHeight() {
+            // 실제 뷰포트 높이의 1%를 CSS 변수 --vh로 설정
+            let vh = window.innerHeight * 0.01;
+            document.documentElement.style.setProperty('--vh', `${vh}px`);
+        }
+        setScreenHeight();
+        // 화면 크기가 변경될 때마다 함수를 다시 호출
+        window.addEventListener('resize', setScreenHeight);
+    </script>
+    <style>
+        body {
+            font-family: 'Jua', sans-serif;
+            touch-action: manipulation;
+        }
+
+        /* 게임 컨테이너 높이를 CSS 변수를 사용하여 설정 */
+        #game-container {
+            /* JS로 계산된 실제 화면 높이를 적용. fallback으로 100vh 사용 */
+            height: calc(var(--vh, 1vh) * 100);
+        }
+        
+        /* 데스크탑 화면에서는 최대 높이를 제한 */
+        @media (min-width: 640px) { /* sm breakpoint */
+            #game-container {
+                height: 90vh;
+                max-height: 800px;
+            }
+        }
+        
+        .road-line {
+            position: absolute;
+            width: 6px;
+            height: 100%;
+            top: 0;
+            background-image: linear-gradient(to bottom, white 50%, transparent 50%);
+            background-size: 100% 70px;
+            animation: road-lines 2.5s linear infinite;
+        }
+
+        @keyframes road-lines {
+            from { background-position: 0 0; }
+            to { background-position: 0 70px; }
+        }
+
+        @keyframes fall {
+            from {
+                transform: translateY(-100px);
+            }
+            to {
+                transform: translateY(100vh);
+            }
+        }
+        
+        .falling {
+            animation: fall 10s linear;
+        }
+
+        #car {
+            transition: left 0.2s ease-out;
+        }
+
+        .modal {
+            transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
+        }
+
+        .modal.hidden {
+            opacity: 0;
+            transform: scale(0.9);
+            pointer-events: none;
+        }
+
+        #player-name-input {
+            border: 2px solid #6366f1;
+            transition: border-color 0.3s;
+        }
+        #player-name-input:focus {
+            outline: none;
+            border-color: #a5b4fc;
+        }
+
+        #leaderboard ol {
+            list-style-type: decimal;
+            padding-left: 2rem;
+        }
+        #leaderboard li {
+            display: flex;
+            justify-content: space-between;
+        }
+    </style>
+</head>
+<body class="bg-gray-800 flex items-center justify-center min-h-screen overflow-hidden">
+
+    <!-- 주 게임 컨테이너: Tailwind 높이 클래스를 제거하고 CSS에서 제어 -->
+    <div id="game-container" class="w-full max-w-md bg-gray-600 rounded-lg shadow-2xl flex flex-col relative overflow-hidden border-4 border-gray-700">
+        
+        <!-- 상단 정보 바 (질문, 점수) -->
+        <div class="bg-gray-900 text-white p-4 shadow-lg z-20">
+            <div id="question" class="text-center text-lg md:text-xl min-h-[5rem] flex items-center justify-center px-2"></div>
+            <div id="player-info" class="absolute top-4 left-4 text-lg font-bold">Player: <span id="player-name-display"></span></div>
+            <div class="absolute top-4 right-4 text-lg font-bold">점수: <span id="score">0</span></div>
+        </div>
+
+        <!-- 게임 화면 (도로) -->
+        <div id="game-screen" class="flex-1 relative">
+            <div class="road-line" style="left: 33.33%; transform: translateX(-50%);"></div>
+            <div class="road-line" style="left: 66.66%; transform: translateX(-50%);"></div>
+            <div id="car" class="w-12 h-16 absolute bottom-8 left-1/2 -translate-x-1/2 text-5xl z-10">🚓</div>
+            <div id="answers-container" class="absolute w-full h-24 flex justify-around" style="top: 0;"></div>
+        </div>
+
+        <!-- 모바일 컨트롤 버튼 (전진 버튼 추가) -->
+        <div class="bg-gray-900 p-2 flex justify-center space-x-2 sm:hidden z-20">
+            <button id="move-left-btn" class="w-1/3 bg-blue-500 text-white font-bold py-4 px-4 rounded-lg text-2xl active:bg-blue-700">◀</button>
+            <button id="move-forward-btn" class="w-1/3 bg-green-500 text-white font-bold py-4 px-4 rounded-lg text-2xl active:bg-green-700">▲</button>
+            <button id="move-right-btn" class="w-1/3 bg-blue-500 text-white font-bold py-4 px-4 rounded-lg text-2xl active:bg-blue-700">▶</button>
+        </div>
+
+        <!-- 시작 / 재시작 화면 모달 -->
+        <div id="start-screen" class="modal absolute inset-0 bg-black bg-opacity-70 flex flex-col items-center justify-center z-30 px-4">
+            <h1 id="start-title" class="text-5xl font-bold text-white mb-4 text-center">일야구도하기 퀴즈</h1>
+            <p id="start-desc" class="text-yellow-300 text-lg mb-6 text-center">정답을 향해 돌진하세요!</p>
+            
+            <div id="name-input-container" class="w-full max-w-sm mb-4">
+                <label for="player-name-input" class="block text-white text-center mb-2">플레이어 이름을 입력하세요</label>
+                <input type="text" id="player-name-input" class="w-full px-4 py-2 rounded-lg bg-gray-200 text-gray-800 text-center font-bold" placeholder="이름" maxlength="10">
+            </div>
+
+            <button id="start-button" class="bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-8 rounded-full text-2xl shadow-lg transform hover:scale-105 transition-transform">
+                게임 시작
+            </button>
+            
+            <div id="leaderboard" class="mt-8 w-full max-w-sm text-white bg-gray-800 bg-opacity-50 p-4 rounded-lg hidden">
+                <h3 class="text-2xl text-yellow-300 font-bold text-center mb-2">� 명예의 전당 🏆</h3>
+                <ol id="leaderboard-list" class="text-lg"></ol>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDKs -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-app.js";
+        import { getFirestore, collection, addDoc, getDocs, query, orderBy, limit, serverTimestamp } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-firestore.js";
+        import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.9.1/firebase-auth.js";
+
+        // --- DOM 요소 선택 ---
+        const car = document.getElementById('car');
+        const gameScreen = document.getElementById('game-screen');
+        const questionEl = document.getElementById('question');
+        const scoreEl = document.getElementById('score');
+        const answersContainer = document.getElementById('answers-container');
+        const startScreen = document.getElementById('start-screen');
+        const startButton = document.getElementById('start-button');
+        const startTitle = document.getElementById('start-title');
+        const startDesc = document.getElementById('start-desc');
+        const moveLeftBtn = document.getElementById('move-left-btn');
+        const moveRightBtn = document.getElementById('move-right-btn');
+        const moveForwardBtn = document.getElementById('move-forward-btn'); // 전진 버튼 추가
+        const roadLines = document.querySelectorAll('.road-line');
+        const playerNameInput = document.getElementById('player-name-input');
+        const playerNameDisplay = document.getElementById('player-name-display');
+        const playerInfo = document.getElementById('player-info');
+        const nameInputContainer = document.getElementById('name-input-container');
+        const leaderboard = document.getElementById('leaderboard');
+        const leaderboardList = document.getElementById('leaderboard-list');
+
+        // --- Firebase 설정 ---
+        let db;
+        try {
+            const firebaseConfig = {
+                apiKey: "AIzaSyDcagfE320vd1DuT6uZ8mHhVy2yB74C1q0",
+                authDomain: "grammar-294b6.firebaseapp.com",
+                projectId: "grammar-294b6",
+                storageBucket: "grammar-294b6.appspot.com",
+                messagingSenderId: "865611264169",
+                appId: "1:865611264169:web:84b9e6d784c3b41bd139b8"
+            };
+            const app = initializeApp(firebaseConfig);
+            db = getFirestore(app);
+            const auth = getAuth(app);
+            signInAnonymously(auth).catch(error => console.error("Anonymous sign-in failed:", error));
+        } catch (e) {
+            console.error("Firebase initialization failed:", e);
+        }
+
+        // --- 사운드 설정 ---
+        let audioCtx;
+        function setupAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+        }
+        function playSound(type) {
+            if (!audioCtx) return;
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            
+            if (type === 'correct') {
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(600, audioCtx.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(800, audioCtx.currentTime + 0.1);
+                gainNode.gain.setValueAtTime(0.3, audioCtx.currentTime);
+            } else if (type === 'incorrect') {
+                oscillator.type = 'square';
+                oscillator.frequency.setValueAtTime(200, audioCtx.currentTime);
+                oscillator.frequency.exponentialRampToValueAtTime(100, audioCtx.currentTime + 0.2);
+                gainNode.gain.setValueAtTime(0.2, audioCtx.currentTime);
+            }
+            
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.2);
+        }
+
+        // --- 퀴즈 데이터 ---
+        const quizData = [
+            { question: "'일야구도하기'의 뜻은?", answers: ["강 건너기 좋은 날", "하룻밤에 강 9번 건너기", "밤낚시 기록"], correct: 1 },
+            { question: "이 글의 작가는 누구인가?", answers: ["박제가", "정약용", "박지원"], correct: 2 },
+            { question: "이 글의 핵심 주제는?", answers: ["자연의 아름다움", "외물에 현혹되지 않는 자세", "우정의 소중함"], correct: 1 },
+            { question: "이 글의 갈래로 적절한 것은?", answers: ["소설", "기행 수필", "희곡"], correct: 1 },
+            { question: "글쓴이가 강물 소리를 비유한 대상이 아닌 것은?", answers: ["전거, 전기", "만리장성", "천둥, 번개"], correct: 1 },
+            { question: "글쓴이에 따르면, 강물 소리는 무엇에 달려 있는가?", answers: ["강물의 깊이", "듣는 이의 마음가짐", "날씨"], correct: 1 },
+            { question: "계곡 물소리가 다르게 들린 이유는?", answers: ["실제 소리가 변해서", "마음속 생각에 따라", "귀가 아파서"], correct: 1 },
+            { question: "낮에 강 건너던 사람들이 하늘을 본 이유는?", answers: ["기도하기 위해", "물을 보면 어지러워서", "별을 보기 위해"], correct: 1 },
+            { question: "낮에 강물 소리를 듣지 못한 이유는?", answers: ["강이 조용해서", "눈앞의 위험에만 집중해서", "귀마개를 해서"], correct: 1 },
+            { question: "밤에 강을 건널 때 두려움을 느낀 까닭은?", answers: ["귀(소리)에만 의존해서", "귀신을 봐서", "길을 잃어서"], correct: 0 },
+            { question: "글쓴이가 깨달은 '도(道)'의 핵심은?", answers: ["마음을 다스려야 한다", "열심히 공부해야 한다", "친구와 사이좋게 지내야 한다"], correct: 0 },
+            { question: "죽음을 각오한 후 글쓴이의 마음 상태는?", answers: ["더욱 불안해짐", "아무 걱정 없이 편안해짐", "슬퍼짐"], correct: 1 },
+            { question: "글쓴이가 강을 비유한 대상이 아닌 것은?", answers: ["내 옷, 내 몸", "대지", "내 친구"], correct: 2 },
+            { question: "본문에 인용된 고사 속 인물은?", answers: ["공자", "맹자", "우임금"], correct: 2 },
+            { question: "우임금 고사의 교훈은?", answers: ["용을 잘 다뤄야 한다", "죽고 사는 문제에 초연해야 한다", "배를 잘 만들어야 한다"], correct: 1 },
+            { question: "소리, 빛깔과 같이 글쓴이가 경계한 것은?", answers: ["내물(內物)", "외물(外物)", "진물(眞物)"], correct: 1 },
+            { question: "글쓴이는 세상살이가 강 건너는 것보다 어떻다고 했나?", answers: ["훨씬 더 위험하다", "훨씬 더 안전하다", "비슷하다"], correct: 0 },
+            { question: "글쓴이가 경고하고자 하는 대상은?", answers: ["마음을 잘 다스리는 사람", "자신의 귀와 눈만 믿는 사람", "여행을 싫어하는 사람"], correct: 1 },
+            { question: "'일야구도하기'가 실린 박지원의 여행기는?", answers: ["열하일기", "산성일기", "서유견문"], correct: 0 },
+            { question: "외부 사물을 뜻하는 한자어 '외물'은?", answers: ["外水", "外物", "外心"], correct: 1 }
+        ];
+
+        let carPosition, score, currentQuestionIndex, gameLoopId, playerName;
+        let isGameActive = false;
+        let questionInProgress = false;
+
+        function init() {
+            carPosition = 1; score = 0; currentQuestionIndex = 0;
+            isGameActive = true; questionInProgress = false;
+            playerInfo.classList.remove('hidden');
+            playerNameDisplay.textContent = playerName;
+            roadLines.forEach(line => line.style.animationPlayState = 'running');
+            updateScore();
+            shuffleQuiz();
+            loadQuestion();
+            updateCarPosition();
+            nameInputContainer.classList.add('hidden');
+            leaderboard.classList.add('hidden');
+            startScreen.classList.add('hidden');
+            if (gameLoopId) cancelAnimationFrame(gameLoopId);
+            gameLoop();
+        }
+        
+        function gameLoop() {
+            if (!isGameActive) return;
+            const carRect = car.getBoundingClientRect();
+            const answersRect = answersContainer.getBoundingClientRect();
+            if (questionInProgress && answersRect.bottom > carRect.top && answersRect.top < carRect.bottom) {
+                handleCollision();
+            }
+            if (questionInProgress && answersRect.top > window.innerHeight) {
+                handleCollision(true);
+            }
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        function handleCollision(missed = false) {
+            if (!questionInProgress) return;
+            questionInProgress = false; 
+            answersContainer.style.animationPlayState = 'paused';
+            const currentQuiz = quizData[currentQuestionIndex];
+            const correctGate = answersContainer.children[currentQuiz.correct];
+            if (missed) {
+                if (correctGate) correctGate.classList.replace('bg-blue-500', 'bg-yellow-500');
+                playSound('incorrect');
+            } else {
+                if (carPosition === currentQuiz.correct) {
+                    score += 5;
+                    updateScore();
+                    correctGate.classList.replace('bg-blue-500', 'bg-green-500');
+                    playSound('correct');
+                } else {
+                    const wrongGate = answersContainer.children[carPosition];
+                    if (wrongGate) wrongGate.classList.replace('bg-blue-500', 'bg-red-600');
+                    if (correctGate) correctGate.classList.replace('bg-blue-500', 'bg-green-500');
+                    playSound('incorrect');
+                }
+            }
+            currentQuestionIndex++;
+            setTimeout(loadQuestion, 1000);
+        }
+
+        // 플레이어가 즉시 정답을 확인할 수 있도록 하는 함수
+        function checkAnswerNow() {
+            if (!questionInProgress) return;
+            handleCollision(false);
+        }
+
+        function shuffleQuiz() {
+            for (let i = quizData.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [quizData[i], quizData[j]] = [quizData[j], quizData[i]];
+            }
+        }
+
+        function loadQuestion() {
+            if (currentQuestionIndex >= quizData.length) {
+                endGame();
+                return;
+            }
+            questionInProgress = true;
+            const currentQuiz = quizData[currentQuestionIndex];
+            questionEl.textContent = `Q${currentQuestionIndex + 1}. ${currentQuiz.question}`;
+            answersContainer.innerHTML = '';
+            currentQuiz.answers.forEach((answer) => {
+                const answerEl = document.createElement('div');
+                answerEl.className = 'w-1/3 h-full flex items-center justify-center text-white text-base md:text-lg font-bold p-2 text-center bg-blue-500 bg-opacity-75 border-2 border-blue-300 rounded-lg';
+                answerEl.textContent = answer;
+                answersContainer.appendChild(answerEl);
+            });
+            answersContainer.classList.remove('falling');
+            void answersContainer.offsetWidth; 
+            answersContainer.style.animationPlayState = 'running';
+            answersContainer.classList.add('falling');
+        }
+        
+        async function endGame() {
+            isGameActive = false;
+            cancelAnimationFrame(gameLoopId);
+            roadLines.forEach(line => line.style.animationPlayState = 'paused');
+            await saveScore(playerName, score);
+            await displayLeaderboard();
+            questionEl.textContent = `퀴즈 완료! 최종 점수: ${score}점`;
+            answersContainer.innerHTML = '';
+            playerInfo.classList.add('hidden');
+            startTitle.textContent = "게임 클리어!";
+            startDesc.innerHTML = `최종 점수: <span class="text-2xl text-white font-bold">${score}</span>점`;
+            startButton.textContent = "다시 시작";
+            nameInputContainer.classList.remove('hidden');
+            leaderboard.classList.remove('hidden');
+            startScreen.classList.remove('hidden');
+        }
+
+        function updateCarPosition() {
+            const laneWidth = gameScreen.offsetWidth / 3;
+            car.style.left = `${(carPosition * laneWidth) + (laneWidth / 2)}px`;
+        }
+        
+        function moveCar(direction) {
+            if (!isGameActive) return;
+            if (direction === 'left' && carPosition > 0) carPosition--;
+            else if (direction === 'right' && carPosition < 2) carPosition++;
+            updateCarPosition();
+        }
+        
+        function updateScore() {
+            scoreEl.textContent = score;
+        }
+
+        async function saveScore(name, score) {
+            if (!db) return;
+            try {
+                await addDoc(collection(db, "scores"), { name: name, score: score, createdAt: serverTimestamp() });
+            } catch (e) { console.error("Error adding document: ", e); }
+        }
+
+        async function displayLeaderboard() {
+            if (!db) return;
+            leaderboardList.innerHTML = '<li>불러오는 중...</li>';
+            try {
+                const q = query(collection(db, "scores"), orderBy("score", "desc"), limit(5));
+                const querySnapshot = await getDocs(q);
+                leaderboardList.innerHTML = '';
+                if (querySnapshot.empty) {
+                    leaderboardList.innerHTML = '<li>아직 랭킹이 없습니다.</li>';
+                    return;
+                }
+                querySnapshot.forEach((doc) => {
+                    const data = doc.data();
+                    const li = document.createElement('li');
+                    li.innerHTML = `<span>${data.name}</span><span>${data.score}점</span>`;
+                    leaderboardList.appendChild(li);
+});
+            } catch (e) {
+                console.error("Error getting documents: ", e);
+                leaderboardList.innerHTML = '<li>랭킹을 불러오지 못했습니다.</li>';
+            }
+        }
+
+        // --- 이벤트 리스너 설정 ---
+        startButton.addEventListener('click', () => {
+            setupAudio();
+            playerName = playerNameInput.value.trim();
+            if (!playerName) {
+                playerNameInput.placeholder = "이름을 꼭 입력해주세요!";
+                playerNameInput.classList.add('border-red-500');
+                setTimeout(() => {
+                    playerNameInput.classList.remove('border-red-500');
+                    playerNameInput.placeholder = "이름";
+                }, 1500);
+                return;
+            }
+            init();
+        });
+
+        document.addEventListener('keydown', (e) => {
+            if (startScreen.classList.contains('hidden')) {
+                if (e.key === 'ArrowLeft') moveCar('left');
+                else if (e.key === 'ArrowRight') moveCar('right');
+                else if (e.key === 'ArrowUp' || e.key === ' ') {
+                    e.preventDefault();
+                    checkAnswerNow(); // 즉시 정답 확인
+                }
+            } else if (e.key === 'Enter') {
+                startButton.click();
+            }
+        });
+
+        moveLeftBtn.addEventListener('click', () => moveCar('left'));
+        moveRightBtn.addEventListener('click', () => moveCar('right'));
+        moveForwardBtn.addEventListener('click', checkAnswerNow); // 전진 버튼에 이벤트 리스너 추가
+
+        window.addEventListener('resize', () => {
+            if (isGameActive) updateCarPosition();
+        });
+        
+    </script>
+</body>
+</html>
+�
